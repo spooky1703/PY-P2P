@@ -102,9 +102,21 @@ def main(page: ft.Page):
             add_log(f"Enviando carpeta: {folderpath}...", ft.Colors.YELLOW)
             threading.Thread(target=file_service.send_file, args=(current_target_ip, folderpath)).start()
 
+    def pick_file_click(e):
+        print("DEBUG: Click en botón archivo")
+        file_picker.pick_files(allow_multiple=False)
+
+    def pick_folder_click(e):
+        print("DEBUG: Click en botón carpeta")
+        folder_picker.get_directory_path()
+
     file_picker = ft.FilePicker(on_result=on_file_picked)
     folder_picker = ft.FilePicker(on_result=on_folder_picked)
     page.overlay.extend([file_picker, folder_picker])
+
+    # Update buttons to use new handlers
+    file_btn.on_click = pick_file_click
+    folder_btn.on_click = pick_folder_click
 
     # Layout
     page.add(
@@ -137,6 +149,9 @@ def main(page: ft.Page):
             )
         ], expand=True)
     )
+    
+    page.update()
+
 
 if __name__ == "__main__":
     ft.app(target=main)
