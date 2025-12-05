@@ -1,8 +1,8 @@
-# PY-P2P 🚀
+# PY-P2P 
 
 Una aplicación moderna y robusta para la transferencia de archivos P2P y chat en red local (LAN), construida con Python y Flet.
 
-## ✨ Características
+## Características
 
 - **Interfaz Moderna**: GUI oscura y elegante con tarjetas de usuario y burbujas de chat.
 - **Auto-Descubrimiento**: Encuentra automáticamente otros dispositivos en tu red Wi-Fi sin necesidad de escribir IPs.
@@ -15,7 +15,7 @@ Una aplicación moderna y robusta para la transferencia de archivos P2P y chat e
 - **Multiplataforma**: Funciona en **Windows** y **macOS** (con soporte nativo para diálogos de sistema en Mac).
 - **Minimizar a Bandeja**: La aplicación sigue funcionando en segundo plano si cierras la ventana principal.
 
-## 🛠️ Requisitos e Instalación
+## Requisitos e Instalación
 
 Necesitas tener **Python 3.x** instalado.
 
@@ -30,7 +30,7 @@ Necesitas tener **Python 3.x** instalado.
     pip install flet
     ```
 
-## 🚀 Uso
+## Uso
 
 1.  Asegúrate de que ambas computadoras estén conectadas a la **misma red Wi-Fi/Ethernet**.
 2.  Ejecuta la aplicación en ambas máquinas:
@@ -41,7 +41,7 @@ Necesitas tener **Python 3.x** instalado.
 4.  Haz clic en el usuario para conectar.
 5.  ¡Empieza a chatear o arrastra archivos para enviarlos!
 
-## ⚠️ Solución de Problemas
+## Solución de Problemas
 
 - **No veo al otro usuario**:
     - Verifica que el **Firewall** de Windows/Mac no esté bloqueando Python.
@@ -49,6 +49,6 @@ Necesitas tener **Python 3.x** instalado.
 - **Error al abrir archivos en Mac**:
     - La app usa AppleScript para abrir el selector de archivos nativo. Si te pide permisos de automatización o acceso al disco, acéptalos.
 
-## 📝 Licencia
+## Licencia
 
 Este proyecto es de código abierto. ¡Siéntete libre de contribuir!
