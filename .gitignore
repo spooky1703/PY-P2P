@@ -1,0 +1,5 @@
+received_files/*
+!received_files/
+!received_files/image.png
+
+__pycache__
