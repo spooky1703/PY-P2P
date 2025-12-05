@@ -2,12 +2,14 @@ import flet as ft
 import threading
 import os
 import sys
-from p2p_core import DiscoveryService, ChatService, FileTransferService, get_local_ip
+import time
+from p2p_core import DiscoveryService, ChatService, FileTransferService, SettingsManager, get_local_ip
 
 # Global services
 discovery_service = None
 chat_service = None
 file_service = None
+settings_manager = None
 
 # Custom Colors
 COLOR_BG = "#0F172A"       # Slate 900
@@ -38,8 +40,13 @@ def main(page: ft.Page):
 
     # State
     current_target_ip = None
-    peers = set()
+    peers = {} # IP -> Peer Info
+    last_clipboard_content = ""
     
+    # Initialize Settings
+    global settings_manager
+    settings_manager = SettingsManager()
+
     # --- UI Components ---
 
     # 1. Sidebar (Peers)
@@ -53,26 +60,39 @@ def main(page: ft.Page):
             ft.Text("P2P Transfer", size=24, weight=ft.FontWeight.BOLD, color=COLOR_PRIMARY),
             ft.Container(
                 content=ft.Row([
-                    ft.Icon(ft.Icons.WIFI, color=ft.Colors.GREEN, size=16),
-                    ft.Text(f"{get_local_ip()}", color=ft.Colors.GREEN, size=14)
+                    ft.Icon(ft.Icons.PERSON, color=ft.Colors.GREEN, size=16),
+                    ft.Text(f"{settings_manager.get('nickname')}", color=ft.Colors.GREEN, size=14, weight=ft.FontWeight.BOLD)
                 ]),
                 bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.GREEN),
                 padding=10,
-                border_radius=8
+                border_radius=8,
+                on_click=lambda _: open_settings_modal()
             ),
             ft.Divider(color=ft.Colors.GREY_700),
             ft.Text("DISPONIBLES", size=12, color=ft.Colors.GREY_500, weight=ft.FontWeight.BOLD),
             peers_column,
             ft.Container(expand=True), # Spacer
             ft.ElevatedButton(
+                "Configuración", 
+                icon=ft.Icons.SETTINGS, 
+                color=ft.Colors.GREY_400,
+                bgcolor=ft.Colors.TRANSPARENT,
+                on_click=lambda _: open_settings_modal()
+            ),
+            ft.ElevatedButton(
                 "Salir", 
                 icon=ft.Icons.EXIT_TO_APP, 
                 color=ft.Colors.RED_400,
                 bgcolor=ft.Colors.TRANSPARENT,
-                on_click=lambda _: page.window_destroy()
+                on_click=lambda _: quit_app()
             )
         ])
     )
+
+    def quit_app():
+        # Force exit immediately without trying to update UI
+        os._exit(0)
+
 
     # 2. Chat Area
     chat_list = ft.ListView(expand=True, spacing=15, auto_scroll=True, padding=20)
@@ -146,15 +166,62 @@ def main(page: ft.Page):
         ])
     )
 
+    # --- Settings Modal ---
+    def open_settings_modal():
+        nick_input = ft.TextField(label="Nickname", value=settings_manager.get("nickname"))
+        download_path_text = ft.Text(settings_manager.get("download_dir"), size=12, color=ft.Colors.GREY_400)
+        clipboard_switch = ft.Switch(label="Compartir Portapapeles", value=settings_manager.get("clipboard_share"))
+        
+        def save_settings(e):
+            settings_manager.save_settings({
+                "nickname": nick_input.value,
+                "clipboard_share": clipboard_switch.value
+            })
+            page.close(dlg)
+            add_system_msg("Configuración guardada.", ft.Colors.GREEN)
+
+        def pick_download_dir(e):
+            download_picker.get_directory_path()
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("Configuración"),
+            content=ft.Column([
+                nick_input,
+                ft.Text("Carpeta de Descargas:"),
+                ft.Row([
+                    download_path_text,
+                    ft.IconButton(ft.Icons.FOLDER, on_click=pick_download_dir)
+                ]),
+                ft.Divider(),
+                clipboard_switch,
+                ft.Text("Si activas el portapapeles, lo que copies se enviará al usuario conectado.", size=12, color=ft.Colors.GREY_500)
+            ], tight=True),
+            actions=[
+                ft.TextButton("Cancelar", on_click=lambda e: page.close(dlg)),
+                ft.TextButton("Guardar", on_click=save_settings),
+            ],
+        )
+        page.open(dlg)
+
+    def on_download_dir_picked(e: ft.FilePickerResultEvent):
+        if e.path:
+            settings_manager.save_settings({"download_dir": e.path})
+            add_system_msg(f"Carpeta de descargas actualizada: {e.path}", ft.Colors.GREEN)
+
+    download_picker = ft.FilePicker(on_result=on_download_dir_picked)
+    page.add(download_picker)
+
     # --- Logic ---
 
     def add_chat_bubble(msg, is_me, sender_ip=""):
         align = ft.MainAxisAlignment.END if is_me else ft.MainAxisAlignment.START
         bg = COLOR_BUBBLE_ME if is_me else COLOR_BUBBLE_PEER
         
+        sender_name = "Yo" if is_me else peers.get(sender_ip, {}).get("nick", sender_ip)
+
         bubble = ft.Container(
             content=ft.Column([
-                ft.Text("Yo" if is_me else sender_ip, size=10, color=ft.Colors.GREY_400),
+                ft.Text(sender_name, size=10, color=ft.Colors.GREY_400),
                 ft.Text(msg, color=ft.Colors.WHITE)
             ], spacing=2),
             bgcolor=bg,
@@ -187,7 +254,8 @@ def main(page: ft.Page):
     def select_peer(ip):
         nonlocal current_target_ip
         current_target_ip = ip
-        target_header.value = f"Chat con {ip}"
+        nick = peers.get(ip, {}).get("nick", ip)
+        target_header.value = f"Chat con {nick}"
         target_header.color = ft.Colors.WHITE
         
         # Update sidebar selection visual
@@ -199,10 +267,21 @@ def main(page: ft.Page):
         
         page.update()
 
-    def on_peer_found(ip):
-        if ip not in peers:
-            peers.add(ip)
-            
+    def on_peer_found(peer_info):
+        ip = peer_info['ip']
+        nick = peer_info.get('nick', ip)
+        avatar = peer_info.get('avatar', '👤')
+        
+        peers[ip] = peer_info
+        
+        found = False
+        for control in peers_column.controls:
+            if isinstance(control, ft.Container) and control.data == ip:
+                control.content.controls[1].controls[0].value = nick
+                found = True
+                break
+        
+        if not found:
             card = ft.Container(
                 data=ip,
                 padding=10,
@@ -210,18 +289,24 @@ def main(page: ft.Page):
                 bgcolor=COLOR_SIDEBAR,
                 on_click=lambda e: select_peer(ip),
                 content=ft.Row([
-                    ft.Icon(ft.Icons.COMPUTER, color=ft.Colors.BLUE_200),
+                    ft.Text(avatar, size=24),
                     ft.Column([
-                        ft.Text(ip, weight=ft.FontWeight.BOLD),
-                        ft.Text("En línea", size=10, color=ft.Colors.GREEN)
+                        ft.Text(nick, weight=ft.FontWeight.BOLD),
+                        ft.Text(ip, size=10, color=ft.Colors.GREY_500)
                     ], spacing=2)
                 ])
             )
             peers_column.controls.append(card)
-            page.update()
+        
+        page.update()
 
     def on_message_received(ip, msg):
         add_chat_bubble(msg, is_me=False, sender_ip=ip)
+
+    def on_clipboard_received(ip, content):
+        if settings_manager.get("clipboard_share"):
+            page.set_clipboard(content)
+            add_system_msg(f"📋 Portapapeles actualizado desde {peers.get(ip, {}).get('nick', ip)}", ft.Colors.PURPLE)
 
     def on_file_progress(filename, sent, total):
         progress = sent / total
@@ -237,23 +322,43 @@ def main(page: ft.Page):
         
         page.update()
 
-    # --- Drag & Drop ---
-    def on_drop(e: ft.FilePickerResultEvent):
-        if not current_target_ip:
-            add_system_msg("Error: Selecciona un usuario antes de soltar archivos", ft.Colors.RED)
-            return
-        
-        # Flet drop event returns a list of files
-        # Note: e.files might be different depending on Flet version for drag&drop
-        # For page.on_file_drop, e is FileDropEvent which has e.file_name (deprecated?) or e.files
-        pass 
+    # --- Clipboard Polling ---
+    def get_clipboard_content():
+        try:
+            if sys.platform == "darwin":
+                return subprocess.check_output("pbpaste", text=True).strip()
+            elif sys.platform == "win32":
+                # PowerShell is slower, but works without dependencies
+                cmd = "powershell -command Get-Clipboard"
+                return subprocess.check_output(cmd, shell=True, text=True).strip()
+        except:
+            return ""
+        return ""
 
+    def clipboard_loop():
+        nonlocal last_clipboard_content
+        while True:
+            if settings_manager.get("clipboard_share") and current_target_ip:
+                try:
+                    content = get_clipboard_content()
+                    if content and content != last_clipboard_content:
+                        last_clipboard_content = content
+                        # Avoid sending if we just received it (loopback prevention could be added here)
+                        # For now, just send.
+                        chat_service.send_clipboard(current_target_ip, content)
+                        # add_system_msg(f"📋 Portapapeles enviado", ft.Colors.GREY_500) # Optional log
+                except Exception as e:
+                    print(f"Clipboard error: {e}")
+            time.sleep(2) # Poll every 2 seconds
+
+    threading.Thread(target=clipboard_loop, daemon=True).start()
+    
+    # --- Drag & Drop ---
     def on_file_drop_handler(e: ft.FilePickerResultEvent):
         if not current_target_ip:
             add_system_msg("⚠️ Selecciona un usuario primero", ft.Colors.ORANGE)
             return
         
-        # e.files is a list of FilePickerFile objects
         for f in e.files:
             path = f.path
             add_system_msg(f"Enviando: {f.name}...", ft.Colors.YELLOW)
@@ -329,13 +434,13 @@ def main(page: ft.Page):
     # Init Pickers
     file_picker = ft.FilePicker(on_result=on_file_picked)
     folder_picker = ft.FilePicker(on_result=on_folder_picked)
-
-
+    
     # Init Services
     global discovery_service, chat_service, file_service
-    discovery_service = DiscoveryService(on_peer_found)
-    chat_service = ChatService(on_message_received)
-    file_service = FileTransferService(on_progress_callback=on_file_progress)
+    
+    discovery_service = DiscoveryService(settings_manager, on_peer_found)
+    chat_service = ChatService(on_message_received, on_clipboard_received)
+    file_service = FileTransferService(settings_manager, on_progress_callback=on_file_progress)
 
     discovery_service.start()
     chat_service.start_server()

@@ -10,10 +10,13 @@ import struct
 FILE_PORT = 5001
 DISCOVERY_PORT = 5002
 CHAT_PORT = 5003
-BUFFER_SIZE = 4096
+BUFFER_SIZE = 64 * 1024 # 64KB for better performance
 SEPARATOR = "<SEPARATOR>"
 BROADCAST_IP = "255.255.255.255"
-DISCOVERY_MSG = b"P2P_DISCOVERY_V2"
+
+# Message Types
+MSG_TYPE_CHAT = 0
+MSG_TYPE_CLIPBOARD = 1
 
 def get_local_ip():
     """Retrieves the local IP address of the machine."""
@@ -27,11 +30,44 @@ def get_local_ip():
         s.close()
     return IP
 
+class SettingsManager:
+    def __init__(self, settings_file="settings.json"):
+        self.settings_file = settings_file
+        self.default_settings = {
+            "nickname": f"User_{get_local_ip().split('.')[-1]}",
+            "download_dir": "received_files",
+            "avatar": "👤", # Default emoji avatar
+            "clipboard_share": False
+        }
+        self.settings = self.load_settings()
+
+    def load_settings(self):
+        if not os.path.exists(self.settings_file):
+            return self.default_settings.copy()
+        try:
+            with open(self.settings_file, "r") as f:
+                return {**self.default_settings, **json.load(f)}
+        except:
+            return self.default_settings.copy()
+
+    def save_settings(self, new_settings):
+        self.settings.update(new_settings)
+        try:
+            with open(self.settings_file, "w") as f:
+                json.dump(self.settings, f, indent=4)
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+        return self.settings
+
+    def get(self, key):
+        return self.settings.get(key, self.default_settings.get(key))
+
 class DiscoveryService:
-    def __init__(self, on_peer_found_callback):
+    def __init__(self, settings_manager, on_peer_found_callback):
+        self.settings_manager = settings_manager
         self.on_peer_found = on_peer_found_callback
         self.running = False
-        self.found_peers = set()
+        self.found_peers = {} # IP -> Info dict
 
     def start(self):
         self.running = True
@@ -44,8 +80,6 @@ class DiscoveryService:
     def _listen_broadcast(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # On Windows, SO_REUSEPORT is not available/needed for this usually, but on Mac/Linux it might be.
-        # We'll try to bind to 0.0.0.0
         try:
             sock.bind(('', DISCOVERY_PORT))
         except Exception as e:
@@ -55,11 +89,17 @@ class DiscoveryService:
         while self.running:
             try:
                 data, addr = sock.recvfrom(1024)
-                if data == DISCOVERY_MSG:
-                    ip = addr[0]
-                    if ip != get_local_ip() and ip not in self.found_peers:
-                        self.found_peers.add(ip)
-                        self.on_peer_found(ip)
+                try:
+                    msg = json.loads(data.decode('utf-8'))
+                    if msg.get('type') == 'discovery':
+                        ip = msg.get('ip')
+                        if ip != get_local_ip():
+                            # Update peer info
+                            self.found_peers[ip] = msg
+                            self.on_peer_found(msg)
+                except json.JSONDecodeError:
+                    # Legacy or invalid message
+                    pass
             except Exception:
                 pass
         sock.close()
@@ -69,15 +109,22 @@ class DiscoveryService:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         while self.running:
             try:
-                sock.sendto(DISCOVERY_MSG, (BROADCAST_IP, DISCOVERY_PORT))
+                msg = {
+                    "type": "discovery",
+                    "ip": get_local_ip(),
+                    "nick": self.settings_manager.get("nickname"),
+                    "avatar": self.settings_manager.get("avatar")
+                }
+                sock.sendto(json.dumps(msg).encode('utf-8'), (BROADCAST_IP, DISCOVERY_PORT))
             except Exception:
                 pass
-            time.sleep(5) # Broadcast every 5 seconds
+            time.sleep(3) # Broadcast every 3 seconds
         sock.close()
 
 class ChatService:
-    def __init__(self, on_message_callback):
+    def __init__(self, on_message_callback, on_clipboard_callback=None):
         self.on_message = on_message_callback
+        self.on_clipboard = on_clipboard_callback
         self.running = False
         self.sock = None
 
@@ -99,35 +146,52 @@ class ChatService:
     def _handle_client(self, client, addr):
         while self.running:
             try:
-                # Simple protocol: Length (4 bytes) + Message
+                # Protocol: Type (1 byte) + Length (4 bytes) + Content
+                msg_type_bytes = client.recv(1)
+                if not msg_type_bytes: break
+                msg_type = msg_type_bytes[0]
+
                 length_bytes = client.recv(4)
                 if not length_bytes: break
                 length = struct.unpack("!I", length_bytes)[0]
-                msg_bytes = client.recv(length)
-                if not msg_bytes: break
-                message = msg_bytes.decode('utf-8')
-                self.on_message(addr[0], message)
+                
+                content_bytes = client.recv(length)
+                if not content_bytes: break
+                content = content_bytes.decode('utf-8')
+
+                if msg_type == MSG_TYPE_CHAT:
+                    self.on_message(addr[0], content)
+                elif msg_type == MSG_TYPE_CLIPBOARD:
+                    if self.on_clipboard:
+                        self.on_clipboard(addr[0], content)
             except Exception:
                 break
         client.close()
 
-    def send_message(self, target_ip, message):
+    def _send_packet(self, target_ip, msg_type, content):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.connect((target_ip, CHAT_PORT))
-            msg_bytes = message.encode('utf-8')
-            length_bytes = struct.pack("!I", len(msg_bytes))
-            s.sendall(length_bytes + msg_bytes)
-            s.close() # For now, one connection per message to keep it simple stateless
+            
+            type_byte = bytes([msg_type])
+            content_bytes = content.encode('utf-8')
+            length_bytes = struct.pack("!I", len(content_bytes))
+            
+            s.sendall(type_byte + length_bytes + content_bytes)
+            s.close()
         except Exception as e:
-            print(f"Error sending chat: {e}")
+            print(f"Error sending packet: {e}")
+
+    def send_message(self, target_ip, message):
+        self._send_packet(target_ip, MSG_TYPE_CHAT, message)
+
+    def send_clipboard(self, target_ip, content):
+        self._send_packet(target_ip, MSG_TYPE_CLIPBOARD, content)
 
 class FileTransferService:
-    def __init__(self, save_dir="received_files", on_progress_callback=None):
-        self.save_dir = save_dir
+    def __init__(self, settings_manager, on_progress_callback=None):
+        self.settings_manager = settings_manager
         self.on_progress = on_progress_callback
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
         self.running = False
 
     def start_server(self):
@@ -147,7 +211,6 @@ class FileTransferService:
 
     def _receive_file(self, client):
         try:
-            # Protocol: JSON Metadata Length (4 bytes) + JSON Metadata + File Content
             len_bytes = client.recv(4)
             meta_len = struct.unpack("!I", len_bytes)[0]
             meta_json = client.recv(meta_len).decode('utf-8')
@@ -157,7 +220,11 @@ class FileTransferService:
             filesize = metadata['filesize']
             is_zip = metadata.get('is_zip', False)
 
-            save_path = os.path.join(self.save_dir, filename)
+            save_dir = self.settings_manager.get("download_dir")
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+
+            save_path = os.path.join(save_dir, filename)
             
             received = 0
             with open(save_path, "wb") as f:
@@ -170,11 +237,9 @@ class FileTransferService:
                         self.on_progress(filename, received, filesize)
 
             if is_zip:
-                # Unzip and remove
-                extract_path = os.path.join(self.save_dir, os.path.splitext(filename)[0])
+                extract_path = os.path.join(save_dir, os.path.splitext(filename)[0])
                 shutil.unpack_archive(save_path, extract_path)
                 os.remove(save_path)
-                print(f"Folder unpacked to {extract_path}")
 
         except Exception as e:
             print(f"Error receiving file: {e}")
@@ -188,7 +253,6 @@ class FileTransferService:
         final_path = filepath
         
         if is_folder:
-            # Zip it
             shutil.make_archive(filepath, 'zip', filepath)
             final_path = filepath + ".zip"
 
@@ -222,7 +286,7 @@ class FileTransferService:
             s.close()
             
             if is_folder:
-                os.remove(final_path) # Clean up generated zip
+                os.remove(final_path)
 
         except Exception as e:
             print(f"Error sending file: {e}")
