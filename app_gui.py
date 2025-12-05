@@ -232,7 +232,7 @@ def main(page: ft.Page):
                 bottom_right=0 if is_me else 12
             ),
             width=None,
-            constraints=ft.BoxConstraints(max_width=500)
+            # constraints=ft.BoxConstraints(max_width=500) # Removed for compatibility
         )
         
         chat_list.controls.append(ft.Row([bubble], alignment=align))
