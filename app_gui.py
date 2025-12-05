@@ -56,10 +56,22 @@ def main(page: ft.Page):
     def on_message_received(ip, msg):
         add_log(f"[{ip}]: {msg}", ft.Colors.CYAN)
 
+    progress_bar = ft.ProgressBar(width=400, color=ft.Colors.BLUE, bgcolor=ft.Colors.GREY_900, value=0, visible=False)
+    progress_text = ft.Text("", visible=False)
+
     def on_file_progress(filename, sent, total):
-        # Simple log for now, could be a progress bar
+        progress = sent / total
+        progress_bar.value = progress
+        progress_bar.visible = True
+        progress_text.value = f"Transfiriendo {filename}: {int(progress * 100)}%"
+        progress_text.visible = True
+        
         if sent == total:
             add_log(f"Transferencia completada: {filename}", ft.Colors.GREEN)
+            progress_bar.visible = False
+            progress_text.visible = False
+        
+        page.update()
 
     # Initialize Services
     global discovery_service, chat_service, file_service
@@ -167,6 +179,7 @@ def main(page: ft.Page):
                     target_text,
                     ft.Divider(),
                     ft.Container(expand=True, content=chat_list, border=ft.border.all(1, ft.Colors.GREY_800), border_radius=10, padding=10),
+                    ft.Column([progress_text, progress_bar]), # Progress area
                     ft.Row([
                         file_btn,
                         folder_btn,
