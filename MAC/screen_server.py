@@ -17,7 +17,7 @@ def load_config():
     """Cargar configuración desde .env"""
     config = {
         'SERVER_HOST': '0.0.0.0',
-        'SERVER_PORT': 5000,
+        'SERVER_PORT': 5050,  # Changed from 5000 to avoid macOS AirPlay conflict
         'DEBUG': False,
         'CAPTURE_FPS': 15,
         'CAPTURE_QUALITY': 80,

@@ -13,8 +13,8 @@ import time
 import json
 import struct
 
-# Screen share port (must match MAC/server.py and windows/server.py)
-SCREEN_PORT = 5000
+# Screen share port - Changed to 5050 to avoid macOS AirPlay conflict on port 5000
+SCREEN_PORT = 5050
 
 # Message types for P2P negotiation
 MSG_TYPE_SCREEN_REQUEST = 2
@@ -87,16 +87,26 @@ class ScreenShareManager:
             python = self._get_python_executable()
             env = os.environ.copy()
             
-            # Don't pipe stdout/stderr - let it run independently
-            # Use DEVNULL to prevent blocking
+            # Create log file in the same directory
+            log_path = os.path.join(os.path.dirname(script_path), "screen_server.log")
+            log_file = open(log_path, 'w')
+            
             self.server_process = subprocess.Popen(
                 [python, script_path],
                 env=env,
                 cwd=os.path.dirname(script_path),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True  # Detach from parent
+                stdout=log_file,
+                stderr=log_file,
+                start_new_session=True
             )
+            
+            # Wait a moment for server to initialize
+            time.sleep(2)
+            
+            # Check if process is still running
+            if self.server_process.poll() is not None:
+                self._notify("Server failed to start - check screen_server.log")
+                return False
             
             self.is_server_running = True
             self._notify(f"Screen server started on port {SCREEN_PORT}")

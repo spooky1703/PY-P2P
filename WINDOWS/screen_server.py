@@ -17,7 +17,7 @@ import traceback
 def load_config():
     config = {
         'SERVER_HOST': '0.0.0.0',
-        'SERVER_PORT': 5000,
+        'SERVER_PORT': 5050,  # Changed from 5000 to avoid macOS AirPlay conflict
         'DEBUG': False,
         'CAPTURE_FPS': 20,        # 20 FPS para fluidez
         'CAPTURE_QUALITY': 65,    # Balance calidad/velocidad

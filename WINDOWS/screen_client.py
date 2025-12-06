@@ -59,7 +59,7 @@ def load_config():
     """Cargar configuración - prioridad: env vars > client.env > defaults"""
     config = {
         'SERVER_HOST': '192.168.100.130',  # IP de tu Windows
-        'SERVER_PORT': 5000,
+        'SERVER_PORT': 5050,  # Changed from 5000 to avoid macOS AirPlay conflict
         'WINDOW_WIDTH': 1200,
         'WINDOW_HEIGHT': 800,
         'DEBUG': False,
