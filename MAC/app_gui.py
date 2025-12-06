@@ -3,13 +3,20 @@ import threading
 import os
 import sys
 import time
-from p2p_core import DiscoveryService, ChatService, FileTransferService, SettingsManager, get_local_ip
+import json
+from p2p_core import (
+    DiscoveryService, ChatService, FileTransferService, SettingsManager, get_local_ip,
+    MSG_TYPE_SCREEN_REQUEST, MSG_TYPE_SCREEN_ACCEPT, MSG_TYPE_SCREEN_REJECT
+)
+from screen_share_service import ScreenShareManager, ScreenShareProtocol
 
 # Global services
 discovery_service = None
 chat_service = None
 file_service = None
 settings_manager = None
+screen_manager = None
+screen_protocol = None
 
 # Custom Colors
 COLOR_BG = "#0F172A"       # Slate 900
@@ -144,6 +151,16 @@ def main(page: ft.Page):
     target_header = ft.Text("Selecciona un usuario para chatear", size=16, weight=ft.FontWeight.BOLD)
     progress_bar = ft.ProgressBar(width=None, color=COLOR_ACCENT, bgcolor=ft.Colors.GREY_800, value=0, visible=False)
     progress_text = ft.Text("", size=12, color=ft.Colors.GREY_400, visible=False)
+    
+    # Screen share button
+    screen_share_btn = ft.IconButton(
+        icon=ft.Icons.SCREEN_SHARE,
+        icon_color=ft.Colors.GREY_400,
+        tooltip="📺 Ver pantalla del peer",
+        visible=False,  # Hidden until a peer is selected
+        on_click=lambda _: request_screen_share()
+    )
+    screen_share_status = ft.Text("", size=10, color=ft.Colors.GREY_500, visible=False)
 
     main_area = ft.Container(
         expand=True,
@@ -155,7 +172,10 @@ def main(page: ft.Page):
                 content=ft.Column([
                     ft.Row([
                         ft.Icon(ft.Icons.PERSON, color=ft.Colors.GREY_400),
-                        target_header
+                        target_header,
+                        ft.Container(expand=True),  # Spacer
+                        screen_share_status,
+                        screen_share_btn
                     ]),
                     progress_text,
                     progress_bar
@@ -258,6 +278,10 @@ def main(page: ft.Page):
         target_header.value = f"Chat con {nick}"
         target_header.color = ft.Colors.WHITE
         
+        # Show screen share button
+        screen_share_btn.visible = True
+        screen_share_btn.icon_color = ft.Colors.GREY_400
+        
         # Update sidebar selection visual
         for control in peers_column.controls:
             if isinstance(control, ft.Container):
@@ -320,6 +344,95 @@ def main(page: ft.Page):
             progress_bar.visible = False
             progress_text.visible = False
         
+        page.update()
+
+    # --- Screen Share Handlers ---
+    def request_screen_share():
+        """Request to view the current peer's screen."""
+        if not current_target_ip:
+            add_system_msg("⚠️ Selecciona un usuario primero", ft.Colors.ORANGE)
+            return
+        
+        nick = peers.get(current_target_ip, {}).get("nick", current_target_ip)
+        add_system_msg(f"📺 Solicitando ver pantalla de {nick}...", ft.Colors.BLUE)
+        screen_share_btn.icon_color = ft.Colors.YELLOW
+        page.update()
+        
+        if screen_protocol:
+            screen_protocol.send_screen_request(current_target_ip)
+    
+    def on_screen_request_received(sender_ip, data):
+        """Handle incoming screen share request - show accept/reject dialog."""
+        nick = peers.get(sender_ip, {}).get("nick", sender_ip)
+        
+        def accept_request(e):
+            page.close(dlg)
+            add_system_msg(f"✅ Compartiendo pantalla con {nick}", ft.Colors.GREEN)
+            if screen_protocol:
+                screen_protocol.send_screen_accept(sender_ip)
+        
+        def reject_request(e):
+            page.close(dlg)
+            add_system_msg(f"❌ Rechazaste compartir pantalla con {nick}", ft.Colors.RED)
+            if screen_protocol:
+                screen_protocol.send_screen_reject(sender_ip)
+        
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("📺 Solicitud de Screen Share"),
+            content=ft.Column([
+                ft.Text(f"{nick} quiere ver tu pantalla."),
+                ft.Text("¿Deseas compartir tu pantalla con este usuario?", size=12, color=ft.Colors.GREY_400)
+            ], tight=True),
+            actions=[
+                ft.TextButton("❌ Rechazar", on_click=reject_request),
+                ft.TextButton("✅ Aceptar", on_click=accept_request),
+            ],
+        )
+        page.open(dlg)
+    
+    def on_screen_message(msg_type, sender_ip, content):
+        """Handle screen share protocol messages."""
+        try:
+            data = json.loads(content)
+            
+            if msg_type == MSG_TYPE_SCREEN_REQUEST:
+                # Someone wants to see our screen
+                on_screen_request_received(sender_ip, data)
+                
+            elif msg_type == MSG_TYPE_SCREEN_ACCEPT:
+                # Our request was accepted, connect to their server
+                nick = peers.get(sender_ip, {}).get("nick", sender_ip)
+                add_system_msg(f"🎉 {nick} aceptó compartir pantalla!", ft.Colors.GREEN)
+                screen_share_btn.icon_color = ft.Colors.GREEN
+                screen_share_status.value = "● Conectando..."
+                screen_share_status.visible = True
+                page.update()
+                
+                host = data.get('ip', sender_ip)
+                port = data.get('port', 5000)
+                if screen_manager:
+                    screen_manager.connect_to_peer(host, port)
+                
+            elif msg_type == MSG_TYPE_SCREEN_REJECT:
+                # Our request was rejected
+                nick = peers.get(sender_ip, {}).get("nick", sender_ip)
+                add_system_msg(f"❌ {nick} rechazó compartir pantalla", ft.Colors.RED)
+                screen_share_btn.icon_color = ft.Colors.GREY_400
+                page.update()
+                
+        except Exception as e:
+            print(f"Error handling screen message: {e}")
+    
+    def on_screen_status(msg):
+        """Handle screen share status updates."""
+        if "Connecting" in msg or "started" in msg.lower():
+            screen_share_status.value = "● Activo"
+            screen_share_status.color = ft.Colors.GREEN
+            screen_share_status.visible = True
+        elif "closed" in msg.lower() or "stopped" in msg.lower():
+            screen_share_status.visible = False
+            screen_share_btn.icon_color = ft.Colors.GREY_400
         page.update()
 
     # --- Clipboard Polling ---
@@ -436,11 +549,15 @@ def main(page: ft.Page):
     folder_picker = ft.FilePicker(on_result=on_folder_picked)
     
     # Init Services
-    global discovery_service, chat_service, file_service
+    global discovery_service, chat_service, file_service, screen_manager, screen_protocol
     
     discovery_service = DiscoveryService(settings_manager, on_peer_found)
-    chat_service = ChatService(on_message_received, on_clipboard_received)
+    chat_service = ChatService(on_message_received, on_clipboard_received, on_screen_message)
     file_service = FileTransferService(settings_manager, on_progress_callback=on_file_progress)
+    
+    # Init Screen Share
+    screen_manager = ScreenShareManager(on_status_callback=on_screen_status)
+    screen_protocol = ScreenShareProtocol(chat_service, screen_manager)
 
     discovery_service.start()
     chat_service.start_server()

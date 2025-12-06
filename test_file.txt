@@ -1,2 +1,0 @@
-Hola, este es un archivo de prueba para la transferencia P2P.
-Si estás leyendo esto en la otra computadora, ¡funcionó!

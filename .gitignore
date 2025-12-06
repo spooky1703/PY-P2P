@@ -1,5 +1,8 @@
 received_files/*
 !received_files/
 !received_files/image.png
-
+build/
+dist/
 __pycache__
+P2P_Transfer.spec
+MAC/settings.json

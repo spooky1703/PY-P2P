@@ -17,6 +17,9 @@ BROADCAST_IP = "255.255.255.255"
 # Message Types
 MSG_TYPE_CHAT = 0
 MSG_TYPE_CLIPBOARD = 1
+MSG_TYPE_SCREEN_REQUEST = 2
+MSG_TYPE_SCREEN_ACCEPT = 3
+MSG_TYPE_SCREEN_REJECT = 4
 
 def get_local_ip():
     """Retrieves the local IP address of the machine."""
@@ -122,9 +125,10 @@ class DiscoveryService:
         sock.close()
 
 class ChatService:
-    def __init__(self, on_message_callback, on_clipboard_callback=None):
+    def __init__(self, on_message_callback, on_clipboard_callback=None, on_screen_callback=None):
         self.on_message = on_message_callback
         self.on_clipboard = on_clipboard_callback
+        self.on_screen = on_screen_callback
         self.running = False
         self.sock = None
 
@@ -164,6 +168,9 @@ class ChatService:
                 elif msg_type == MSG_TYPE_CLIPBOARD:
                     if self.on_clipboard:
                         self.on_clipboard(addr[0], content)
+                elif msg_type in (MSG_TYPE_SCREEN_REQUEST, MSG_TYPE_SCREEN_ACCEPT, MSG_TYPE_SCREEN_REJECT):
+                    if self.on_screen:
+                        self.on_screen(msg_type, addr[0], content)
             except Exception:
                 break
         client.close()
