@@ -87,12 +87,15 @@ class ScreenShareManager:
             python = self._get_python_executable()
             env = os.environ.copy()
             
+            # Don't pipe stdout/stderr - let it run independently
+            # Use DEVNULL to prevent blocking
             self.server_process = subprocess.Popen(
                 [python, script_path],
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=os.path.dirname(script_path)
+                cwd=os.path.dirname(script_path),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True  # Detach from parent
             )
             
             self.is_server_running = True
@@ -131,13 +134,23 @@ class ScreenShareManager:
             env['SERVER_HOST'] = host
             env['SERVER_PORT'] = str(port)
             
-            self.client_process = subprocess.Popen(
-                [python, script_path],
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=os.path.dirname(script_path)
-            )
+            # Launch GUI app without piping - it needs its own window
+            # On macOS, we need to ensure PyQt6 can open its window
+            if sys.platform == "darwin":
+                # Use open command to properly launch GUI app on macOS
+                self.client_process = subprocess.Popen(
+                    [python, script_path],
+                    env=env,
+                    cwd=os.path.dirname(script_path),
+                    start_new_session=True
+                )
+            else:
+                self.client_process = subprocess.Popen(
+                    [python, script_path],
+                    env=env,
+                    cwd=os.path.dirname(script_path),
+                    creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+                )
             
             self.is_client_running = True
             self._notify(f"Connecting to {host}:{port}...")
