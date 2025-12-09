@@ -1,0 +1,28 @@
+
+    ╔════════════════════════════════════════════════════════╗
+    ║     🍎 SCREEN SHARE SERVER - MAC                       ║
+    ║            Ready for connections                       ║
+    ╠════════════════════════════════════════════════════════╣
+    ║                                                        ║
+    ║  📡 Local IP:        192.168.100.9                      ║
+    ║  🔌 Port:                     5050                      ║
+    ║  ⚙️  FPS:                        15                      ║
+    ║  📊 Quality:                   80%                      ║
+    ║                                                        ║
+    ║  🌐 URL: http://192.168.100.9:5050                       ║
+    ║                                                        ║
+    ╚════════════════════════════════════════════════════════╝
+    
+    ⚠️  Para control remoto, MacOS pedirá permisos de:
+        - Grabación de pantalla (Screen Recording)
+        - Accesibilidad (Accessibility)
+    
+    Presiona Ctrl+C para detener
+    
+ * Serving Flask app 'screen_server'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5050
+ * Running on http://192.168.100.9:5050
+[33mPress CTRL+C to quit[0m
